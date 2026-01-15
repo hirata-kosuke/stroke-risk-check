@@ -15,7 +15,7 @@ import type { StrokeRiskInput, StrokeRiskResult } from '../types/stroke';
  * 年齢スコアの計算
  * テーブル: 40-44→0, 45-49→5, 50-54→6, 55-59→12, 60-64→16, 65-69→19
  */
-function calculateAgeScore(age: number, gender: 'male' | 'female'): number {
+function calculateAgeScore(age: number): number {
   if (age < 45) return 0;
   if (age < 50) return 5;
   if (age < 55) return 6;
@@ -143,7 +143,7 @@ export function calculateBMI(height: number, weight: number): number {
 export function evaluateStrokeRisk(input: StrokeRiskInput): StrokeRiskResult {
   const bmi = calculateBMI(input.height, input.weight);
 
-  const ageScore = calculateAgeScore(input.age, input.gender);
+  const ageScore = calculateAgeScore(input.age);
   const genderScore = calculateGenderScore(input.gender);
   const smokingScore = calculateSmokingScore(input.smoking, input.gender);
   const bmiScore = calculateBMIScore(bmi);

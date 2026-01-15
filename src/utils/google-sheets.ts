@@ -26,7 +26,7 @@ export async function sendToGoogleSheets(data: SheetData): Promise<void> {
   }
 
   try {
-    const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+    await fetch(GOOGLE_APPS_SCRIPT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
