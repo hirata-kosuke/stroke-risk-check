@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Home, Printer, Heart } from 'lucide-react';
+import { Activity, Home, Printer, Heart, Camera, Share2 } from 'lucide-react';
+import html2canvas from 'html2canvas';
 import { getRiskLevelText, getRiskLevelColor } from '../utils/evaluation';
 import type { StrokeRiskResult, StrokeRiskInput, CirculatoryRiskResult } from '../types/stroke';
 
@@ -18,6 +19,11 @@ interface ResultData {
 export function ResultPage() {
   const navigate = useNavigate();
   const [resultData, setResultData] = useState<ResultData | null>(null);
+  const resultContainerRef = useRef<HTMLDivElement>(null);
+  const [isSavingImage, setIsSavingImage] = useState(false);
+
+  // スマホかどうかを判定
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
   useEffect(() => {
     const dataStr = localStorage.getItem('strokeCheckResult');
@@ -66,6 +72,139 @@ export function ResultPage() {
     window.print();
   };
 
+  // 画像として保存する機能（カメラロール/写真アプリに保存）
+  const handleSaveAsImage = async () => {
+    if (!resultContainerRef.current || isSavingImage) return;
+
+    setIsSavingImage(true);
+
+    try {
+      // スクロール位置を保存
+      const scrollY = window.scrollY;
+      window.scrollTo(0, 0);
+
+      // 少し待ってからキャプチャ
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const canvas = await html2canvas(resultContainerRef.current, {
+        backgroundColor: '#f3f4f6',
+        scale: 2, // 高解像度
+        useCORS: true,
+        logging: false,
+        windowWidth: resultContainerRef.current.scrollWidth,
+        windowHeight: resultContainerRef.current.scrollHeight,
+      });
+
+      // スクロール位置を復元
+      window.scrollTo(0, scrollY);
+
+      // Blob に変換
+      const blob = await new Promise<Blob>((resolve) => {
+        canvas.toBlob((b) => resolve(b!), 'image/png', 1.0);
+      });
+
+      // ファイル名を生成
+      const fileName = `脳卒中リスク評価結果_${new Date().toLocaleDateString('ja-JP').replace(/\//g, '-')}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      // Web Share API でファイル共有（写真アプリに保存可能）
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: '脳卒中リスク評価結果',
+            text: '結果を画像として保存'
+          });
+          setIsSavingImage(false);
+          return;
+        } catch (err: unknown) {
+          // ユーザーがキャンセルした場合
+          if (err instanceof Error && err.name === 'AbortError') {
+            setIsSavingImage(false);
+            return;
+          }
+          console.log('共有に失敗、フォールバックを使用');
+        }
+      }
+
+      // フォールバック: 画像を新しいタブで開く（長押しで保存可能）
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // iOSの場合は新しいウィンドウで画像を開く（長押しで保存できる）
+      if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        const newWindow = window.open();
+        if (newWindow) {
+          newWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>脳卒中リスク評価結果</title>
+              <style>
+                body { margin: 0; padding: 20px; background: #f3f4f6; text-align: center; }
+                img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                p { color: #374151; font-family: sans-serif; margin-top: 20px; font-size: 16px; }
+              </style>
+            </head>
+            <body>
+              <p>📱 画像を長押しして「写真に追加」を選択してください</p>
+              <img src="${dataUrl}" alt="脳卒中リスク評価結果" />
+            </body>
+            </html>
+          `);
+          newWindow.document.close();
+        }
+      } else {
+        // Androidの場合はダウンロード
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        alert('画像をダウンロードしました。ダウンロードフォルダを確認してください。');
+      }
+    } catch (error) {
+      console.error('画像保存エラー:', error);
+      alert('画像の保存に失敗しました');
+    } finally {
+      setIsSavingImage(false);
+    }
+  };
+
+  // スマホ用の共有機能（テキスト）
+  const handleShare = async () => {
+    if (!resultData) return;
+
+    const shareText = `【脳卒中リスク評価結果】
+10年間の発症確率: ${resultData.result.risk_probability}%
+リスクレベル: ${getRiskLevelText(resultData.result.risk_level)}
+合計スコア: ${resultData.result.total_score}点
+
+評価日時: ${new Date().toLocaleString('ja-JP')}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: '脳卒中リスク評価結果',
+          text: shareText,
+        });
+      } catch (err) {
+        console.log('共有がキャンセルされました');
+      }
+    } else {
+      // Web Share APIが使えない場合はクリップボードにコピー
+      try {
+        await navigator.clipboard.writeText(shareText);
+        alert('結果をクリップボードにコピーしました');
+      } catch (err) {
+        alert('コピーに失敗しました');
+      }
+    }
+  };
+
   const handleRestart = () => {
     localStorage.removeItem('strokeCheckBasicInfo');
     localStorage.removeItem('strokeCheckResult');
@@ -73,7 +212,7 @@ export function ResultPage() {
   };
 
   return (
-    <div className="container">
+    <div className="container" ref={resultContainerRef}>
       <div className="result-header no-print">
         <Activity size={64} className="icon" />
         <h1>脳卒中リスク評価結果</h1>
@@ -314,15 +453,93 @@ export function ResultPage() {
         </div>
       </div>
 
-      <div className="result-actions no-print">
-        <button className="btn-secondary" onClick={handlePrint}>
-          <Printer size={20} />
-          結果を印刷
-        </button>
-        <button className="btn-primary" onClick={handleRestart}>
-          <Home size={20} />
-          最初に戻る
-        </button>
+      <div className="result-actions no-print" style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        gap: '0.75rem',
+        marginTop: '1.5rem'
+      }}>
+        {isMobile ? (
+          <>
+            <button
+              className="btn-primary"
+              onClick={handleSaveAsImage}
+              disabled={isSavingImage}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '1rem',
+                fontSize: '1rem',
+                width: '100%',
+                backgroundColor: '#10b981'
+              }}
+            >
+              <Camera size={20} />
+              {isSavingImage ? '保存中...' : '画像として保存'}
+            </button>
+            <button
+              className="btn-primary"
+              onClick={handleShare}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '1rem',
+                fontSize: '1rem',
+                width: '100%'
+              }}
+            >
+              <Share2 size={20} />
+              テキストで共有
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={handlePrint}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '1rem',
+                fontSize: '1rem',
+                width: '100%'
+              }}
+            >
+              <Printer size={20} />
+              印刷 / PDF保存
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={handleRestart}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '1rem',
+                fontSize: '1rem',
+                width: '100%'
+              }}
+            >
+              <Home size={20} />
+              最初に戻る
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn-secondary" onClick={handlePrint}>
+              <Printer size={20} />
+              結果を印刷
+            </button>
+            <button className="btn-primary" onClick={handleRestart}>
+              <Home size={20} />
+              最初に戻る
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
